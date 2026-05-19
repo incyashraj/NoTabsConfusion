@@ -2,19 +2,24 @@ import AppKit
 import QuartzCore
 
 // rank 0 — animated gradient glow (purple→blue→cyan), slow rotation
-// rank 1 — dim blue static glow
-// rank 2 — very faint white static glow
+// rank 1 — amber static glow
+// rank 2 — teal static glow
 final class BorderView: NSView {
 
     var rank: Int = 0 { didSet { rebuild() } }
-    var glowRadius:  CGFloat { rank == 0 ? 16 : (rank == 1 ? 8 : 5) }
-    var borderWidth: CGFloat { rank == 0 ? 3  : (rank == 1 ? 1.5 : 1) }
+    var glowRadius:  CGFloat { rank == 0 ? 18 : (rank == 1 ? 10 : 6) }
+    var borderWidth: CGFloat { rank == 0 ? 5  : (rank == 1 ? 3  : 1.5) }
+
+    var appIcon: NSImage? { didSet { updateIconLayer() } }
 
     private var gradientLayer:  CAGradientLayer?
     private var strokeMask:     CAShapeLayer?
     private var glowLayer:      CAShapeLayer?
     private var staticLayer:    CAShapeLayer?
+    private var iconLayer:      CALayer?
     private var rotationTimer:  Timer?
+
+    private let iconSize: CGFloat = 36
 
     override init(frame: NSRect) { super.init(frame: frame); setup() }
     required init?(coder: NSCoder) { super.init(coder: coder); setup() }
@@ -28,17 +33,18 @@ final class BorderView: NSView {
     private func rebuild() {
         rotationTimer?.invalidate(); rotationTimer = nil
         layer?.sublayers?.forEach { $0.removeFromSuperlayer() }
-        gradientLayer = nil; strokeMask = nil; glowLayer = nil; staticLayer = nil
+        gradientLayer = nil; strokeMask = nil; glowLayer = nil; staticLayer = nil; iconLayer = nil
 
         if rank == 0 { buildAnimatedGlow() }
         else          { buildStaticGlow() }
+
+        buildIconLayer()
         needsLayout = true
     }
 
     // MARK: - Rank 0: animated gradient
 
     private func buildAnimatedGlow() {
-        // Outer soft bloom
         let glow = CAShapeLayer()
         glow.fillColor    = CGColor.clear
         glow.strokeColor  = NSColor.systemPurple.withAlphaComponent(0.3).cgColor
@@ -50,7 +56,6 @@ final class BorderView: NSView {
         layer?.addSublayer(glow)
         glowLayer = glow
 
-        // Linear gradient (purple→blue→cyan→white→blue→purple) masked to stroke
         let grad = CAGradientLayer()
         grad.colors = [
             NSColor.systemPurple.cgColor,
@@ -74,10 +79,8 @@ final class BorderView: NSView {
         gradientLayer = grad
         strokeMask    = mask
 
-        // Animate startPoint + endPoint to slowly rotate the gradient
         addRotationAnimation(to: grad)
 
-        // Timer to slowly pulse the glow color
         var t: Double = 0
         rotationTimer = Timer.scheduledTimer(withTimeInterval: 1.0/30.0, repeats: true) { [weak self] _ in
             guard let self, let glow = self.glowLayer else { return }
@@ -93,7 +96,6 @@ final class BorderView: NSView {
     }
 
     private func addRotationAnimation(to grad: CAGradientLayer) {
-        // Rotate by animating startPoint around a circle (12s per revolution)
         let dur: CFTimeInterval = 12
 
         let sp = CAKeyframeAnimation(keyPath: "startPoint")
@@ -114,24 +116,51 @@ final class BorderView: NSView {
         grad.add(ep, forKey: "endRotation")
     }
 
-    // MARK: - Rank 1/2: static dim glow
+    // MARK: - Rank 1/2: static glow
 
     private func buildStaticGlow() {
-        // rank 1: visible blue — readable in Mission Control thumbnails
-        // rank 2: soft orange-amber — distinct from blue, still subtle in normal view
+        // rank 1: warm amber/gold — "just left, still warm"
+        // rank 2: cool teal — "further back, fading"
         let color: NSColor = rank == 1
-            ? NSColor.systemBlue.withAlphaComponent(0.85)
-            : NSColor(red: 0.95, green: 0.6, blue: 0.1, alpha: 0.7)
+            ? NSColor(red: 1.0, green: 0.65, blue: 0.0, alpha: 1.0)
+            : NSColor(red: 0.0, green: 0.85, blue: 0.75, alpha: 1.0)
         let s = CAShapeLayer()
         s.fillColor     = CGColor.clear
         s.strokeColor   = color.cgColor
         s.lineWidth     = borderWidth
         s.shadowColor   = color.cgColor
         s.shadowRadius  = glowRadius
-        s.shadowOpacity = rank == 1 ? 0.8 : 0.6
+        s.shadowOpacity = 1.0
         s.shadowOffset  = .zero
         layer?.addSublayer(s)
         staticLayer = s
+    }
+
+    // MARK: - App icon badge
+
+    private func buildIconLayer() {
+        let icon = CALayer()
+        icon.contentsGravity = .resizeAspect
+        icon.cornerRadius    = 8
+        icon.masksToBounds   = true
+        // Subtle drop shadow so the icon reads against any background
+        icon.shadowColor     = CGColor(gray: 0, alpha: 1)
+        icon.shadowOpacity   = 0.5
+        icon.shadowRadius    = 4
+        icon.shadowOffset    = CGSize(width: 0, height: -2)
+        layer?.addSublayer(icon)
+        iconLayer = icon
+        updateIconLayer()
+    }
+
+    private func updateIconLayer() {
+        guard let iconLayer else { return }
+        if let img = appIcon {
+            iconLayer.contents = img
+            iconLayer.isHidden = false
+        } else {
+            iconLayer.isHidden = true
+        }
     }
 
     // MARK: - Layout
@@ -145,9 +174,11 @@ final class BorderView: NSView {
     private func updateShapes() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+
         let inset: CGFloat = borderWidth / 2 + 1
         let path = CGPath(roundedRect: bounds.insetBy(dx: inset, dy: inset),
                           cornerWidth: 9, cornerHeight: 9, transform: nil)
+
         if rank == 0 {
             glowLayer?.frame    = bounds; glowLayer?.path    = path
             gradientLayer?.frame = bounds
@@ -155,6 +186,14 @@ final class BorderView: NSView {
         } else {
             staticLayer?.frame  = bounds; staticLayer?.path  = path
         }
+
+        // Position icon at top-left corner, half-overlapping the border
+        if let iconLayer {
+            let offset: CGFloat = iconSize / 2 - borderWidth
+            iconLayer.frame = CGRect(x: offset, y: bounds.height - offset - iconSize,
+                                     width: iconSize, height: iconSize)
+        }
+
         CATransaction.commit()
     }
 

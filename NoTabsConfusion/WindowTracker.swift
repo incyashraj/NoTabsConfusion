@@ -5,8 +5,8 @@ import ApplicationServices
 @_silgen_name("_AXUIElementGetWindow") func _AXUIElementGetWindow(_ element: AXUIElement, _ wid: inout CGWindowID) -> AXError
 
 protocol WindowTrackerDelegate: AnyObject {
-    // Called with up to 3 (windowID, frame) pairs, most-recent first
-    func windowTrackerDidUpdate(slots: [(id: CGWindowID, frame: NSRect)])
+    // Called with up to 3 (windowID, frame, icon) tuples, most-recent first
+    func windowTrackerDidUpdate(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)])
 }
 
 final class WindowTracker {
@@ -18,6 +18,8 @@ final class WindowTracker {
     private var lastFrontmostPID: pid_t = 0
     // Most-recent first, max 3 entries, no duplicates
     private var windowHistory: [CGWindowID] = []
+    // Maps CGWindowID → owning pid so we can look up the app icon
+    private var windowPID: [CGWindowID: pid_t] = [:]
     private var pollTimer: Timer?
 
     init(delegate: WindowTrackerDelegate) {
@@ -72,6 +74,7 @@ final class WindowTracker {
         windowHistory.removeAll { $0 == wid }
         windowHistory.insert(wid, at: 0)
         if windowHistory.count > 3 { windowHistory = Array(windowHistory.prefix(3)) }
+        windowPID[wid] = pid
 
         delegate?.windowTrackerDidUpdate(slots: resolvedSlots())
     }
@@ -89,9 +92,9 @@ final class WindowTracker {
         delegate?.windowTrackerDidUpdate(slots: resolvedSlots())
     }
 
-    // Resolve window history to (id, frame) pairs, pruning dead windows
+    // Resolve window history to (id, frame, icon) tuples, pruning dead windows
     // and deduplicating overlapping frames so two overlays never stack.
-    private func resolvedSlots() -> [(id: CGWindowID, frame: NSRect)] {
+    private func resolvedSlots() -> [(id: CGWindowID, frame: NSRect, icon: NSImage?)] {
         // Deduplicate IDs first (insurance against any race that inserts the same ID twice)
         var seen = Set<CGWindowID>()
         windowHistory = windowHistory.filter { seen.insert($0).inserted }
@@ -99,7 +102,7 @@ final class WindowTracker {
         // Prune IDs that no longer exist on screen
         windowHistory = windowHistory.filter { frameForWindowID($0) != nil }
 
-        var result: [(id: CGWindowID, frame: NSRect)] = []
+        var result: [(id: CGWindowID, frame: NSRect, icon: NSImage?)] = []
         for wid in windowHistory {
             guard let frame = frameForWindowID(wid) else { continue }
             // Skip if another slot already covers the same screen area (within 20pt on all edges)
@@ -109,7 +112,12 @@ final class WindowTracker {
                 abs($0.frame.width - frame.width) < 20 &&
                 abs($0.frame.height - frame.height) < 20
             }
-            if !duplicate { result.append((id: wid, frame: frame)) }
+            if !duplicate {
+                let icon = windowPID[wid].flatMap {
+                    NSRunningApplication(processIdentifier: $0)?.icon
+                }
+                result.append((id: wid, frame: frame, icon: icon))
+            }
             if result.count == 3 { break }
         }
         return result

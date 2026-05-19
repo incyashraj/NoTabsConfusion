@@ -13,10 +13,8 @@ final class OverlayWindow: NSWindow {
         backgroundColor = .clear
         hasShadow = false
         ignoresMouseEvents = true
-        // Rank 0 floats above everything (statusBar level).
-        // Ranks 1/2 sit just below normal windows so they're hidden behind the app
-        // during regular use, but visible in Mission Control where all windows lift.
-        level = rank == 0 ? .statusBar : NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.normalWindow)) - 1)
+        // All ranks at statusBar level — borders only show during Mission Control anyway.
+        level = .statusBar
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         contentView = borderView
     }
@@ -35,21 +33,34 @@ final class OverlayWindowController {
                            OverlayWindow(rank: 2)]
 
     private var padding: CGFloat { 6 }
+    private var normalSizes: [CGWindowID: CGSize] = [:]
 
     // Called with ordered list of (windowID, frame) from most-recent to oldest.
-    // All tracked windows always show their border — rank 0 is the animated glow,
-    // ranks 1 and 2 are subtle static borders so they're visible in Mission Control
-    // without being distracting in normal use.
-    func update(slots: [(id: CGWindowID, frame: NSRect)]) {
+    // All borders are hidden during normal use — they only appear in Mission Control.
+    func update(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) {
+        let inMissionControl = isMissionControlActive(slots: slots)
+
         for (i, win) in windows.enumerated() {
-            if i < slots.count {
-                let frame = slots[i].frame.insetBy(dx: -padding, dy: -padding)
+            if i < slots.count && inMissionControl {
+                let slot = slots[i]
+                let frame = slot.frame.insetBy(dx: -padding, dy: -padding)
                 win.setFrame(frame, display: false)
+                win.borderView.appIcon = slot.icon
                 if !win.isVisible { win.orderFront(nil) }
             } else {
                 win.orderOut(nil)
             }
         }
+
+        if !inMissionControl {
+            for slot in slots { normalSizes[slot.id] = slot.frame.size }
+        }
+    }
+
+    private func isMissionControlActive(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) -> Bool {
+        guard let slot = slots.first, let normal = normalSizes[slot.id] else { return false }
+        let ratio = (slot.frame.width * slot.frame.height) / (normal.width * normal.height)
+        return ratio < 0.85
     }
 
     func hideAll() {

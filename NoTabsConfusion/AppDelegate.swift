@@ -106,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - WindowTrackerDelegate
 
 extension OverlayWindowController: WindowTrackerDelegate {
-    func windowTrackerDidUpdate(slots: [(id: CGWindowID, frame: NSRect)]) {
+    func windowTrackerDidUpdate(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) {
         update(slots: slots)
     }
 }

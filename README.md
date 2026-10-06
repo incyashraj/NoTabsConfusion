@@ -1,6 +1,14 @@
 # NoTabsConfusion
 
-Free menu bar app for Mac. In Mission Control it outlines the windows you were just using and shows each app icon. The menu bar name is FocusBorder. Not on the App Store.
+Swipe up with four fingers and Mission Control shows every open window. Most apps are plain black or white, and the windows change place every time you swipe.
+
+This keeps a set color on the three you used last, so you can see where you came from and where you were going.
+
+- The one you just left: purple
+- The one before that: amber
+- The one before that: teal
+
+Colors show only in Mission Control. The menu bar name is FocusBorder. Free, and not on the App Store.
 
 [Website](https://incyashraj.github.io/NoTabsConfusion/) · [Download 1.0](https://github.com/incyashraj/NoTabsConfusion/releases/latest/download/NoTabsConfusion-1.0.zip)
 
@@ -18,8 +26,6 @@ Free menu bar app for Mac. In Mission Control it outlines the windows you were j
 2. Open it. There is no Dock icon. Use the scope icon in the menu bar.
 3. Allow the access prompt so the app can see the front window. It also needs Accessibility access.
 4. If macOS blocks the first open, go to System Settings → Privacy & Security and click Open Anyway.
-
-The most recent window gets a purple-blue border, the one before it an amber border, and the third a teal border. Borders stay hidden until Mission Control is open.
 
 ## Privacy
 

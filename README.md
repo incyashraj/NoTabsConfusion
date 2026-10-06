@@ -1,22 +1,12 @@
-<p align="center">
-  <img src="docs/icon.png" width="128" height="128" alt="NoTabsConfusion app icon">
-</p>
+# NoTabsConfusion
 
-<h1 align="center">NoTabsConfusion</h1>
+Free menu bar app for Mac. In Mission Control it outlines the windows you were just using and shows each app icon. The menu bar name is FocusBorder. Not on the App Store.
 
-<p align="center">
-  Free menu bar app for Mac. In Mission Control it outlines the windows you were just using and shows each app icon.
-  <br>
-  <a href="https://incyashraj.github.io/NoTabsConfusion/">Website</a>
-  ·
-  <a href="https://github.com/incyashraj/NoTabsConfusion/releases/latest">Download</a>
-</p>
+[Website](https://incyashraj.github.io/NoTabsConfusion/) · [Download 1.0](https://github.com/incyashraj/NoTabsConfusion/releases/latest/download/NoTabsConfusion-1.0.zip)
 
-The menu bar name is FocusBorder. The app is not on the App Store.
+<img src="docs/icon.png" width="64" height="64" alt="NoTabsConfusion icon">
 
-## Download
-
-[NoTabsConfusion 1.0](https://github.com/incyashraj/NoTabsConfusion/releases/latest/download/NoTabsConfusion-1.0.zip)
+## Requirements
 
 - Apple silicon
 - macOS 26.2 or later
@@ -29,12 +19,12 @@ The menu bar name is FocusBorder. The app is not on the App Store.
 3. Allow the access prompt so the app can see the front window. It also needs Accessibility access.
 4. If macOS blocks the first open, go to System Settings → Privacy & Security and click Open Anyway.
 
-Open Mission Control to see the borders. The most recent window gets a purple-blue glow, the one before it an amber border, and the third a teal border. Each border carries that app’s icon. Borders stay hidden the rest of the time.
+The most recent window gets a purple-blue border, the one before it an amber border, and the third a teal border. Borders stay hidden until Mission Control is open.
 
 ## Privacy
 
-No account, no ads, and no network requests. The [privacy note](PRIVACY.md) has the short version.
+No account, no ads, and no network requests. See [PRIVACY.md](PRIVACY.md).
 
 ## Build
 
-Open `NoTabsConfusion.xcodeproj` in Xcode and run the NoTabsConfusion scheme. The project targets macOS 26.2.
+Open `NoTabsConfusion.xcodeproj` in Xcode and run the NoTabsConfusion scheme.

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NoTabsConfusion for Mac — highlight recent windows in Mission Control</title>
+  <meta name="description" content="NoTabsConfusion is a free menu bar app for Mac. In Mission Control it draws a colored border and the app icon around the windows you were just using. Signed download, not on the App Store.">
+  <link rel="canonical" href="https://incyashraj.github.io/NoTabsConfusion/">
+  <meta name="author" content="Yashraj Pardeshi">
+  <meta name="theme-color" content="#140a24">
+  <link rel="icon" href="favicon.png" type="image/png">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="NoTabsConfusion for Mac — highlight recent windows in Mission Control">
+  <meta property="og:description" content="Free menu bar app. Colored borders and app icons on the windows you were just using, shown while Mission Control is open.">
+  <meta property="og:url" content="https://incyashraj.github.io/NoTabsConfusion/">
+  <meta property="og:image" content="https://incyashraj.github.io/NoTabsConfusion/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="NoTabsConfusion for Mac">
+  <meta name="twitter:description" content="Free menu bar app that outlines your recent windows in Mission Control.">
+  <meta name="twitter:image" content="https://incyashraj.github.io/NoTabsConfusion/og.jpg">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "NoTabsConfusion",
+    "alternateName": "FocusBorder",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "macOS 26.2 or later",
+    "softwareVersion": "1.0",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "downloadUrl": "https://github.com/incyashraj/NoTabsConfusion/releases/latest/download/NoTabsConfusion-1.0.zip",
+    "author": {
+      "@type": "Person",
+      "name": "Yashraj Pardeshi",
+      "url": "https://github.com/incyashraj"
+    },
+    "description": "Menu bar app for Mac that draws a colored border and app icon around recent windows while Mission Control is open.",
+    "image": "https://incyashraj.github.io/NoTabsConfusion/icon.png"
+  }
+  </script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #100818;
+      --card: #1a1030;
+      --text: #f4f1fb;
+      --muted: #b7adc9;
+      --line: #3a2c58;
+      --accent: #8b7cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 18px/1.55 "Iowan Old Style", Palatino, Georgia, serif;
+      background: radial-gradient(1200px 500px at 10% -10%, #2a1860 0%, transparent 55%), var(--bg);
+      color: var(--text);
+    }
+    a { color: #c4b8ff; }
+    header, main, footer { width: min(880px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 48px 0 12px; display: flex; gap: 24px; align-items: center; }
+    header img { width: 96px; height: 96px; border-radius: 22px; }
+    h1 { font: 600 40px/1.1 system-ui, sans-serif; margin: 0 0 8px; letter-spacing: -0.03em; }
+    .lede { margin: 0; color: var(--muted); font-family: system-ui, sans-serif; }
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 28px 0; }
+    .button, .ghost {
+      font-family: system-ui, sans-serif;
+      text-decoration: none;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font-weight: 650;
+    }
+    .button { background: #efeaff; color: #1a1030; }
+    .ghost { border: 1px solid var(--line); color: var(--text); }
+    section { margin: 28px 0; }
+    h2 { font: 600 26px/1.2 system-ui, sans-serif; margin: 0 0 10px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px 18px 8px;
+    }
+    .diagram { display: grid; gap: 16px; }
+    .window {
+      position: relative;
+      height: 92px;
+      border-radius: 16px;
+      background: #241838;
+    }
+    .window strong {
+      position: absolute;
+      left: 58px;
+      top: 18px;
+      font-family: system-ui, sans-serif;
+      font-size: 16px;
+    }
+    .window span {
+      position: absolute;
+      left: 58px;
+      bottom: 16px;
+      color: var(--muted);
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+    }
+    .badge {
+      position: absolute;
+      left: 16px;
+      top: 26px;
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      background: #efeaff;
+    }
+    .recent { box-shadow: 0 0 0 4px #7a5cff, 0 0 22px #5b8cff; }
+    .previous { box-shadow: 0 0 0 3px #ff9a1a, 0 0 16px #ff9a1a; }
+    .older { box-shadow: 0 0 0 2px #00d6bf; }
+    ul { margin: 8px 0 0; padding-left: 1.2em; }
+    li { margin: 6px 0; }
+    caption, .note { color: var(--muted); font-family: system-ui, sans-serif; font-size: 15px; }
+    footer { padding: 12px 0 48px; color: var(--muted); font-family: system-ui, sans-serif; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="icon.png" width="96" height="96" alt="NoTabsConfusion app icon: a glowing rounded square with a focus mark">
+    <div>
+      <h1>NoTabsConfusion</h1>
+      <p class="lede">A free menu bar app for Mac. While Mission Control is open, it draws a colored border around the windows you were just using, with each app’s icon.</p>
+    </div>
+  </header>
+  <main>
+    <div class="actions">
+      <a class="button" href="https://github.com/incyashraj/NoTabsConfusion/releases/latest/download/NoTabsConfusion-1.0.zip">Download for Mac</a>
+      <a class="ghost" href="https://github.com/incyashraj/NoTabsConfusion">Source on GitHub</a>
+    </div>
+
+    <section>
+      <h2>What it shows</h2>
+      <div class="card">
+        <div class="diagram" role="img" aria-label="Diagram of three window borders: purple for the most recent window, amber for the one before it, and teal for the third.">
+          <div class="window recent"><i class="badge"></i><strong>Most recent window</strong><span>Purple to blue glow, plus the app icon</span></div>
+          <div class="window previous"><i class="badge"></i><strong>The window before that</strong><span>Amber border</span></div>
+          <div class="window older"><i class="badge"></i><strong>One further back</strong><span>Teal border</span></div>
+        </div>
+        <p class="note">This is a diagram of the three border styles, not a photo of a desktop. Borders stay hidden during normal use and appear when you open Mission Control.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Install</h2>
+      <ol>
+        <li>Download <a href="https://github.com/incyashraj/NoTabsConfusion/releases/latest/download/NoTabsConfusion-1.0.zip">NoTabsConfusion-1.0.zip</a> and unzip it.</li>
+        <li>Move NoTabsConfusion into Applications and open it.</li>
+        <li>There is no Dock icon. The scope mark in the menu bar is the app. Quit is on that menu.</li>
+        <li>The first time, macOS asks for access so the app can see which window is in front. Allow it in System Settings. The app also needs Accessibility access for the same reason.</li>
+        <li>If macOS says it cannot verify the developer, open System Settings, go to Privacy &amp; Security, and click Open Anyway. The build is signed with a Developer ID. Notarization is still waiting on an Apple developer agreement.</li>
+      </ol>
+      <p>Requires an Apple silicon Mac on macOS 26.2 or later. The menu calls the app FocusBorder. The download name is NoTabsConfusion.</p>
+    </section>
+
+    <section>
+      <h2>Privacy</h2>
+      <ul>
+        <li>No account, no ads, and no network requests.</li>
+        <li>Window titles, frames, and app icons are read on your Mac so a border can be drawn. Nothing is uploaded.</li>
+        <li>Details are in the <a href="https://github.com/incyashraj/NoTabsConfusion/blob/main/PRIVACY.md">privacy note</a>.</li>
+      </ul>
+    </section>
+  </main>
+  <footer>
+    NoTabsConfusion 1.0 · Yashraj Pardeshi · <a href="https://github.com/incyashraj/NoTabsConfusion/releases/tag/v1.0">Release v1.0</a>
+  </footer>
+</body>
+</html>

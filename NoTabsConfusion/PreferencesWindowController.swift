@@ -3,70 +3,84 @@ import AppKit
 @MainActor
 final class PreferencesWindowController: NSWindowController {
 
-    private var colorWell: NSColorWell!
+    private var colorWells: [NSColorWell] = []
     private var widthSlider: NSSlider!
     private var glowSlider: NSSlider!
     private var widthLabel: NSTextField!
     private var glowLabel: NSTextField!
+    private var iconCheckbox: NSButton!
+    private var countControl: NSSegmentedControl!
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 340, height: 220),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 392),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        window.title = "FocusBorder Preferences"
+        window.title = "NoTabsConfusion"
         window.center()
         self.init(window: window)
         buildUI()
         loadFromDefaults()
     }
 
-    // MARK: - UI
+    override func showWindow(_ sender: Any?) {
+        loadFromDefaults()
+        super.showWindow(sender)
+    }
 
     private func buildUI() {
         guard let content = window?.contentView else { return }
 
-        // Color row
-        let colorLabel = makeLabel("Border color:")
-        colorLabel.frame = NSRect(x: 20, y: 160, width: 100, height: 22)
+        let colors = Prefs.defaultColors
+        for index in 0..<3 {
+            let label = makeLabel(Prefs.colorLabels[index])
+            label.frame = NSRect(x: 20, y: 340 - index * 48, width: 110, height: 22)
+            let well = NSColorWell(frame: NSRect(x: 144, y: 334 - index * 48, width: 52, height: 30))
+            well.color = colors[index]
+            well.tag = index
+            well.target = self
+            well.action = #selector(colorChanged(_:))
+            colorWells.append(well)
+            content.addSubview(label)
+            content.addSubview(well)
+        }
 
-        colorWell = NSColorWell(frame: NSRect(x: 130, y: 155, width: 44, height: 30))
-        colorWell.color = .controlAccentColor
-        colorWell.target = self
-        colorWell.action = #selector(colorChanged)
-
-        // Width row
-        let wLabel = makeLabel("Border width:")
-        wLabel.frame = NSRect(x: 20, y: 112, width: 100, height: 22)
-
-        widthSlider = NSSlider(value: 4, minValue: 2, maxValue: 20, target: self, action: #selector(widthChanged))
-        widthSlider.frame = NSRect(x: 130, y: 112, width: 150, height: 22)
+        let widthTitle = makeLabel("Border width:")
+        widthTitle.frame = NSRect(x: 20, y: 196, width: 110, height: 22)
+        widthSlider = NSSlider(value: Double(Prefs.defaultWidth), minValue: 2, maxValue: 16, target: self, action: #selector(widthChanged))
+        widthSlider.frame = NSRect(x: 144, y: 196, width: 190, height: 22)
         widthSlider.isContinuous = true
-
         widthLabel = makeLabel("4 pt")
-        widthLabel.frame = NSRect(x: 290, y: 112, width: 40, height: 22)
+        widthLabel.alignment = .left
+        widthLabel.frame = NSRect(x: 344, y: 196, width: 56, height: 22)
 
-        // Glow row
-        let gLabel = makeLabel("Glow radius:")
-        gLabel.frame = NSRect(x: 20, y: 64, width: 100, height: 22)
-
-        glowSlider = NSSlider(value: 12, minValue: 0, maxValue: 40, target: self, action: #selector(glowChanged))
-        glowSlider.frame = NSRect(x: 130, y: 64, width: 150, height: 22)
+        let glowTitle = makeLabel("Glow:")
+        glowTitle.frame = NSRect(x: 20, y: 150, width: 110, height: 22)
+        glowSlider = NSSlider(value: Double(Prefs.defaultGlow), minValue: 0, maxValue: 32, target: self, action: #selector(glowChanged))
+        glowSlider.frame = NSRect(x: 144, y: 150, width: 190, height: 22)
         glowSlider.isContinuous = true
+        glowLabel = makeLabel("14 pt")
+        glowLabel.alignment = .left
+        glowLabel.frame = NSRect(x: 344, y: 150, width: 56, height: 22)
 
-        glowLabel = makeLabel("12 pt")
-        glowLabel.frame = NSRect(x: 290, y: 64, width: 40, height: 22)
+        iconCheckbox = NSButton(checkboxWithTitle: "Show app icons", target: self, action: #selector(iconChanged))
+        iconCheckbox.frame = NSRect(x: 142, y: 108, width: 180, height: 22)
 
-        // Done button
-        let doneBtn = NSButton(title: "Done", target: self, action: #selector(done))
-        doneBtn.bezelStyle = .rounded
-        doneBtn.keyEquivalent = "\r"
-        doneBtn.frame = NSRect(x: 240, y: 16, width: 80, height: 32)
+        let countTitle = makeLabel("Recent apps:")
+        countTitle.frame = NSRect(x: 20, y: 66, width: 110, height: 22)
+        countControl = NSSegmentedControl(labels: ["2", "3"], trackingMode: .selectOne, target: self, action: #selector(countChanged))
+        countControl.frame = NSRect(x: 144, y: 62, width: 120, height: 28)
+        countControl.selectedSegment = 1
 
-        [colorLabel, colorWell, wLabel, widthSlider, widthLabel,
-         gLabel, glowSlider, glowLabel, doneBtn].forEach { content.addSubview($0) }
+        let done = NSButton(title: "Done", target: self, action: #selector(done))
+        done.bezelStyle = .rounded
+        done.keyEquivalent = "\r"
+        done.frame = NSRect(x: 316, y: 16, width: 84, height: 32)
+
+        [widthTitle, widthSlider, widthLabel, glowTitle, glowSlider, glowLabel,
+         iconCheckbox, countTitle, countControl, done].forEach { content.addSubview($0) }
     }
 
     private func makeLabel(_ text: String) -> NSTextField {
@@ -75,62 +89,58 @@ final class PreferencesWindowController: NSWindowController {
         return field
     }
 
-    // MARK: - Actions
-
-    @objc private func colorChanged() {
-        saveToDefaults()
+    @objc private func colorChanged(_ sender: NSColorWell) {
+        Prefs.setColor(sender.color, at: sender.tag)
+        notify()
     }
 
     @objc private func widthChanged() {
-        let v = Int(widthSlider.doubleValue)
-        widthLabel.stringValue = "\(v) pt"
-        saveToDefaults()
+        let value = widthSlider.doubleValue
+        widthLabel.stringValue = "\(Int(value.rounded())) pt"
+        UserDefaults.standard.set(Float(value), forKey: Prefs.widthKey)
+        notify()
     }
 
     @objc private func glowChanged() {
-        let v = Int(glowSlider.doubleValue)
-        glowLabel.stringValue = "\(v) pt"
-        saveToDefaults()
+        let value = glowSlider.doubleValue
+        glowLabel.stringValue = "\(Int(value.rounded())) pt"
+        UserDefaults.standard.set(Float(value), forKey: Prefs.glowKey)
+        notify()
+    }
+
+    @objc private func iconChanged() {
+        Prefs.showsIcon = iconCheckbox.state == .on
+        notify()
+    }
+
+    @objc private func countChanged() {
+        Prefs.recentCount = countControl.selectedSegment == 0 ? 2 : 3
+        notify()
     }
 
     @objc private func done() {
-        saveToDefaults()
         window?.close()
     }
 
-    // MARK: - Persistence
-
-    private func saveToDefaults() {
-        let defaults = UserDefaults.standard
-        if let data = try? NSKeyedArchiver.archivedData(
-            withRootObject: colorWell.color,
-            requiringSecureCoding: false
-        ) {
-            defaults.set(data, forKey: Prefs.colorKey)
-        }
-        defaults.set(Float(widthSlider.doubleValue), forKey: Prefs.widthKey)
-        defaults.set(Float(glowSlider.doubleValue),  forKey: Prefs.glowKey)
+    private func notify() {
         NotificationCenter.default.post(name: .preferencesDidChange, object: nil)
     }
 
     private func loadFromDefaults() {
-        let defaults = UserDefaults.standard
-
-        if let data = defaults.data(forKey: Prefs.colorKey),
-           let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: data) {
-            colorWell.color = color
+        let colors = Prefs.colors()
+        for (index, well) in colorWells.enumerated() where index < colors.count {
+            well.color = colors[index]
         }
 
-        let width = defaults.float(forKey: Prefs.widthKey)
-        if width > 0 {
-            widthSlider.doubleValue = Double(width)
-            widthLabel.stringValue = "\(Int(width)) pt"
-        }
+        let width = Prefs.width()
+        widthSlider.doubleValue = Double(width)
+        widthLabel.stringValue = "\(Int(width.rounded())) pt"
 
-        let glow = defaults.float(forKey: Prefs.glowKey)
-        if glow > 0 {
-            glowSlider.doubleValue = Double(glow)
-            glowLabel.stringValue = "\(Int(glow)) pt"
-        }
+        let glow = Prefs.glow()
+        glowSlider.doubleValue = Double(glow)
+        glowLabel.stringValue = "\(Int(glow.rounded())) pt"
+
+        iconCheckbox.state = Prefs.showsIcon ? .on : .off
+        countControl.selectedSegment = Prefs.recentCount == 2 ? 0 : 1
     }
 }

@@ -26,6 +26,13 @@ Colors show only in Mission Control. The menu bar name is FocusBorder. Free, and
 2. Open it. There is no Dock icon. Use the scope icon in the menu bar.
 3. Allow the access prompt so the app can see the front window. It also needs Accessibility access.
 
+
+## Preferences
+
+The menu bar icon can pause the borders, ignore the front app, show or hide app icons, and open the app at login.
+
+Preferences sets the three colors, the border width, the glow, and whether to mark the last 2 or 3 apps. SmartNotch is ignored until you include it again from the menu.
+
 ## Privacy
 
 No account, no ads, and no network requests. See [PRIVACY.md](PRIVACY.md).

@@ -25,7 +25,6 @@ Colors show only in Mission Control. The menu bar name is FocusBorder. Free, and
 1. Unzip the download and move `NoTabsConfusion.app` to Applications.
 2. Open it. There is no Dock icon. Use the scope icon in the menu bar.
 3. Allow the access prompt so the app can see the front window. It also needs Accessibility access.
-4. If macOS blocks the first open, go to System Settings → Privacy & Security and click Open Anyway.
 
 ## Privacy
 

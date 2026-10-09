@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tracker: WindowTracker!
     private var prefsWindowController: PreferencesWindowController?
 
+    private let accessItem = NSMenuItem(title: "Allow Window Access…", action: #selector(requestAccess), keyEquivalent: "")
     private let pauseItem = NSMenuItem(title: "Pause", action: #selector(togglePause), keyEquivalent: "")
     private let ignoreItem = NSMenuItem(title: "Ignore Front App", action: #selector(ignoreFrontApp), keyEquivalent: "")
     private let ignoredItem = NSMenuItem(title: "Ignored Apps", action: nil, keyEquivalent: "")
@@ -23,7 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             app.forceTerminate()
         }
 
-        requestAccessibilityIfNeeded()
         setupStatusItem()
 
         overlayController = OverlayWindowController()
@@ -39,22 +39,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             object: nil
         )
         updateStatusAppearance()
+        revealOnLaunch()
     }
 
     private func setupStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "scope", accessibilityDescription: "NoTabsConfusion")
             button.image?.isTemplate = true
+            button.imagePosition = .imageLeading
+            button.title = "NoTabs"
         }
 
-        for item in [pauseItem, ignoreItem, iconItem, loginItem] {
+        for item in [accessItem, pauseItem, ignoreItem, iconItem, loginItem] {
             item.target = self
         }
         ignoredItem.submenu = ignoredMenu
 
         let menu = NSMenu()
         menu.delegate = self
+        menu.addItem(accessItem)
         menu.addItem(pauseItem)
         menu.addItem(ignoreItem)
         menu.addItem(ignoredItem)
@@ -70,6 +74,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        let trusted = AXIsProcessTrusted()
+        accessItem.isHidden = trusted
         pauseItem.title = Prefs.isPaused ? "Resume" : "Pause"
         iconItem.state = Prefs.showsIcon ? .on : .off
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -159,8 +165,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if prefsWindowController == nil {
             prefsWindowController = PreferencesWindowController()
         }
+        // A menu-bar-only app has no Dock icon. Become a regular app while
+        // the window is open so the window can come forward.
+        NSApp.setActivationPolicy(.regular)
         prefsWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func revealOnLaunch() {
+        openPreferences()
+        requestAccessibilityIfNeeded()
+    }
+
+    @objc private func requestAccess() {
+        requestAccessibilityIfNeeded()
     }
 
     @objc private func preferencesChanged() {
@@ -171,19 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func requestAccessibilityIfNeeded() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        let trusted = AXIsProcessTrustedWithOptions(options)
-        if !trusted {
-            showAccessibilityAlert()
-        }
-    }
-
-    private func showAccessibilityAlert() {
-        let alert = NSAlert()
-        alert.messageText = "Permission needed"
-        alert.informativeText = "NoTabsConfusion needs permission to see which window is in front. Allow it in the system prompt. The borders will not appear until that is on."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        _ = AXIsProcessTrustedWithOptions(options)
     }
 }
 

@@ -19,8 +19,10 @@ final class PreferencesWindowController: NSWindowController {
             defer: false
         )
         window.title = "NoTabsConfusion"
+        window.isReleasedWhenClosed = false
         window.center()
         self.init(window: window)
+        window.delegate = self
         buildUI()
         loadFromDefaults()
     }
@@ -142,5 +144,11 @@ final class PreferencesWindowController: NSWindowController {
 
         iconCheckbox.state = Prefs.showsIcon ? .on : .off
         countControl.selectedSegment = Prefs.recentCount == 2 ? 0 : 1
+    }
+}
+
+extension PreferencesWindowController: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
     }
 }

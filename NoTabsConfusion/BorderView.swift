@@ -2,7 +2,7 @@ import AppKit
 import QuartzCore
 
 // Rank 0, the app you just left, has a bright segment traveling the edge.
-// The other two stay still. The middle of the window stays empty.
+// The other two stay still. A faint 1, 2, or 3 sits in the middle.
 final class BorderView: NSView {
 
     var borderColor: NSColor = Prefs.defaultColors[0] { didSet { updateAppearance() } }
@@ -11,13 +11,16 @@ final class BorderView: NSView {
     var showsIcon: Bool = true { didSet { updateIconLayer() } }
     var appIcon: NSImage? { didSet { updateIconLayer() } }
     var revolves: Bool = false { didSet { syncMotion() } }
+    var rankNumber: Int = 1 { didSet { if rankNumber != oldValue { drawnNumberSide = 0; needsLayout = true } } }
 
     private let rim = CALayer()
     private let stroke = CAShapeLayer()
     private let comet = CAShapeLayer()
     private let ringMask = CAShapeLayer()
+    private let numberLayer = CALayer()
     private let icon = CALayer()
     private let iconSize: CGFloat = 32
+    private var drawnNumberSide: CGFloat = 0
     private var dashCycle: CGFloat = 1
     private var animatedCycle: CGFloat = -1
 
@@ -47,6 +50,9 @@ final class BorderView: NSView {
         rim.addSublayer(stroke)
         rim.addSublayer(comet)
         layer?.addSublayer(rim)
+
+        numberLayer.contentsGravity = .resizeAspect
+        layer?.addSublayer(numberLayer)
 
         icon.contentsGravity = .resizeAspect
         icon.cornerRadius = 7
@@ -158,8 +164,60 @@ final class BorderView: NSView {
             height: iconSize
         )
         icon.isHidden = !showsIcon || appIcon == nil
+        placeNumber()
 
         CATransaction.commit()
         syncMotion()
+    }
+
+    // A large gray numeral. Alpha stays low so the window preview still shows through.
+    private func placeNumber() {
+        let shortest = min(bounds.width, bounds.height)
+        guard shortest > 36, (1...3).contains(rankNumber) else {
+            numberLayer.isHidden = true
+            return
+        }
+        if abs(shortest - drawnNumberSide) > 1 || numberLayer.contents == nil {
+            drawnNumberSide = shortest
+            let fontSize = shortest * 0.72
+            let base = NSFont.systemFont(ofSize: fontSize, weight: .medium)
+            let descriptor = base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor
+            let font = NSFont(descriptor: descriptor, size: fontSize) ?? base
+            let text = NSString(string: "\(rankNumber)")
+            let color = NSColor(srgbRed: 0.42, green: 0.42, blue: 0.42, alpha: 0.40)
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            let size = text.size(withAttributes: attrs)
+            let scale: CGFloat = 2
+            guard let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: max(Int(size.width * scale), 1),
+                pixelsHigh: max(Int(size.height * scale), 1),
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            ) else { return }
+            NSGraphicsContext.saveGraphicsState()
+            if let gfx = NSGraphicsContext(bitmapImageRep: rep) {
+                NSGraphicsContext.current = gfx
+                gfx.cgContext.scaleBy(x: scale, y: scale)
+                text.draw(at: .zero, withAttributes: attrs)
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            numberLayer.contents = rep.cgImage
+            numberLayer.contentsScale = scale
+            numberLayer.bounds = CGRect(origin: .zero, size: size)
+        }
+        let size = numberLayer.bounds.size
+        numberLayer.frame = CGRect(
+            x: (bounds.width - size.width) / 2,
+            y: (bounds.height - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
+        numberLayer.isHidden = false
     }
 }

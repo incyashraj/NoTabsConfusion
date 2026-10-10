@@ -7,7 +7,7 @@ final class OverlayWindow: NSWindow {
     init(rank: Int) {
         borderView = BorderView()
         borderView.borderColor = Prefs.defaultColors[rank]
-        borderView.revolves = rank == 0
+        borderView.revolves = false
         borderView.rankNumber = rank + 1
         super.init(contentRect: .zero, styleMask: .borderless,
                    backing: .buffered, defer: false)
@@ -95,11 +95,14 @@ final class OverlayWindowController {
         let width = Prefs.width()
         let glow = Prefs.glow()
         let showIcon = Prefs.showsIcon
+        let showNumbers = Prefs.showsNumbers
         for (i, win) in windows.enumerated() {
             win.borderView.borderColor = colors[i]
             win.borderView.borderWidth = width
             win.borderView.glowRadius = glow
             win.borderView.showsIcon = showIcon
+            win.borderView.showsNumber = showNumbers
+            win.borderView.revolves = false
         }
     }
 
@@ -171,6 +174,7 @@ enum Prefs {
     static let widthKey = "borderWidth"
     static let glowKey = "glowRadius"
     static let showIconKey = "showAppIcon"
+    static let showNumbersKey = "showNumbers"
     static let recentCountKey = "recentCount"
     static let pausedKey = "paused"
     static let ignoredKey = "ignoredBundleIDs"
@@ -218,6 +222,14 @@ enum Prefs {
             return UserDefaults.standard.bool(forKey: showIconKey)
         }
         set { UserDefaults.standard.set(newValue, forKey: showIconKey) }
+    }
+
+    static var showsNumbers: Bool {
+        get {
+            guard UserDefaults.standard.object(forKey: showNumbersKey) != nil else { return true }
+            return UserDefaults.standard.bool(forKey: showNumbersKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: showNumbersKey) }
     }
 
     static var recentCount: Int {

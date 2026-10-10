@@ -1,8 +1,7 @@
 import AppKit
 import QuartzCore
 
-// Rank 0, the app you just left, has a bright segment traveling the edge.
-// The other two stay still. A faint 1, 2, or 3 sits in the middle.
+// A faint 1, 2, or 3 sits in the middle when numbers are turned on.
 final class BorderView: NSView {
 
     var borderColor: NSColor = Prefs.defaultColors[0] { didSet { updateAppearance() } }
@@ -11,6 +10,17 @@ final class BorderView: NSView {
     var showsIcon: Bool = true { didSet { updateIconLayer() } }
     var appIcon: NSImage? { didSet { updateIconLayer() } }
     var revolves: Bool = false { didSet { syncMotion() } }
+    var showsNumber: Bool = true {
+        didSet {
+            guard showsNumber != oldValue else { return }
+            if showsNumber {
+                needsLayout = true
+                layout()
+            } else {
+                numberLayer.isHidden = true
+            }
+        }
+    }
     var rankNumber: Int = 1 { didSet { if rankNumber != oldValue { drawnNumberSide = 0; needsLayout = true } } }
 
     private let rim = CALayer()
@@ -173,7 +183,7 @@ final class BorderView: NSView {
     // A large gray numeral. Alpha stays low so the window preview still shows through.
     private func placeNumber() {
         let shortest = min(bounds.width, bounds.height)
-        guard shortest > 36, (1...3).contains(rankNumber) else {
+        guard showsNumber, shortest > 36, (1...3).contains(rankNumber) else {
             numberLayer.isHidden = true
             return
         }

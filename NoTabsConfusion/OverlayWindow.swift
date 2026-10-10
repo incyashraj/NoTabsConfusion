@@ -76,11 +76,12 @@ final class OverlayWindowController {
         }
     }
 
-    // Dock owns a window named "Mission Control" while the four-finger view is open.
-    // If that window is missing, fall back to two or more tracked windows shrinking at once.
+    // Current macOS draws the four-finger view as WindowManager windows
+    // (ExposeShieldWindow, Spaces Bar), not a Dock window named "Mission Control".
+    // If those are missing, fall back to two or more tracked windows shrinking at once.
     // One window resized by hand is not enough.
     private func isMissionControlActive(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) -> Bool {
-        if Self.dockIsShowingMissionControl() { return true }
+        if Self.systemIsShowingMissionControl() { return true }
 
         let shrunk = slots.filter { slot in
             guard let normal = normalSizes[slot.id], normal.width > 1, normal.height > 1 else { return false }
@@ -90,15 +91,23 @@ final class OverlayWindowController {
         return shrunk.count >= 2
     }
 
-    private static func dockIsShowingMissionControl() -> Bool {
+    private static func systemIsShowingMissionControl() -> Bool {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
         for info in list {
             let owner = info[kCGWindowOwnerName as String] as? String ?? ""
-            guard owner == "Dock" else { continue }
             let name = info[kCGWindowName as String] as? String ?? ""
-            if name == "Mission Control" || name.contains("Mission Control") {
+            if name.contains("Mission Control") || name.contains("Expose") {
                 return true
             }
+            // Name can be blank. The shield is a large WindowManager window above the desktop.
+            guard owner == "WindowManager",
+                  let layer = info[kCGWindowLayer as String] as? Int,
+                  layer >= 15,
+                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat]
+            else { continue }
+            let width = bounds["Width"] ?? 0
+            let height = bounds["Height"] ?? 0
+            if width >= 400, height >= 400 { return true }
         }
         return false
     }

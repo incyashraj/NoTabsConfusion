@@ -174,7 +174,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func revealOnLaunch() {
         openPreferences()
-        requestAccessibilityIfNeeded()
     }
 
     @objc private func requestAccess() {

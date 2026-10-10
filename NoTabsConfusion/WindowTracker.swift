@@ -24,6 +24,17 @@ final class WindowTracker {
     private var recents: [RecentApp] = []
     private var pollTimer: Timer?
 
+    // These own Mission Control chrome and permission dialogs, not apps the user switched to.
+    private let systemBundleIDs: Set<String> = [
+        "com.apple.WindowManager",
+        "com.apple.dock",
+        "com.apple.controlcenter",
+        "com.apple.notificationcenterui",
+        "com.apple.Spotlight",
+        "com.apple.loginwindow",
+        "com.apple.accessibility.universalAccessAuthWarn"
+    ]
+
     init(delegate: WindowTrackerDelegate) {
         self.delegate = delegate
     }
@@ -40,6 +51,7 @@ final class WindowTracker {
             self?.pollFrame()
         }
 
+        seedFromVisibleWindows()
         refreshTrackedWindow()
     }
 
@@ -59,24 +71,47 @@ final class WindowTracker {
         }
     }
 
+    private func isTrackable(_ bundleID: String) -> Bool {
+        bundleID != Bundle.main.bundleIdentifier
+            && !systemBundleIDs.contains(bundleID)
+            && !Prefs.ignoredBundleIDs().contains(bundleID)
+    }
+
+    // Front-to-back windows already on screen, so the first swipe has something to color.
+    private func seedFromVisibleWindows() {
+        let list = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] ?? []
+        var seen = Set<String>()
+        for info in list {
+            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+                  let wid = info[kCGWindowNumber as String] as? CGWindowID,
+                  let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat],
+                  (bounds["Width"] ?? 0) > 80, (bounds["Height"] ?? 0) > 80,
+                  let bundleID = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier,
+                  isTrackable(bundleID),
+                  !seen.contains(bundleID)
+            else { continue }
+            seen.insert(bundleID)
+            recents.append(RecentApp(bundleID: bundleID, pid: pid, windowID: wid))
+            if recents.count == Prefs.recentCount { break }
+        }
+    }
+
     private func refreshTrackedWindow() {
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bundleID = app.bundleIdentifier,
-              bundleID != Bundle.main.bundleIdentifier,
-              !Prefs.ignoredBundleIDs().contains(bundleID),
+              isTrackable(bundleID),
               !app.isTerminated
         else { return }
 
         let pid = app.processIdentifier
-        if pid != observedPID {
+        if AXIsProcessTrusted(), pid != observedPID {
             installAXObserver(pid: pid)
         }
 
-        guard let winElement = focusedWindowElement(pid: pid),
-              !isMinimized(winElement) else { return }
-
-        let wid = matchCGWindowID(axElement: winElement, pid: pid)
-        guard wid != kCGNullWindowID else { return }
+        guard let wid = resolveWindowID(pid: pid) else { return }
 
         recents.removeAll { $0.bundleID == bundleID }
         recents.insert(RecentApp(bundleID: bundleID, pid: pid, windowID: wid), at: 0)
@@ -88,7 +123,7 @@ final class WindowTracker {
         let frontApp = NSWorkspace.shared.frontmostApplication
         let currentPID = frontApp?.processIdentifier ?? 0
 
-        if let bid = frontApp?.bundleIdentifier, Prefs.ignoredBundleIDs().contains(bid) {
+        if let bid = frontApp?.bundleIdentifier, !isTrackable(bid) {
             lastFrontmostPID = currentPID
             publish()
             return
@@ -134,6 +169,34 @@ final class WindowTracker {
         }
 
         delegate?.windowTrackerDidUpdate(slots: result)
+    }
+
+    private func resolveWindowID(pid: pid_t) -> CGWindowID? {
+        if AXIsProcessTrusted(),
+           let element = focusedWindowElement(pid: pid),
+           !isMinimized(element) {
+            let wid = matchCGWindowID(axElement: element, pid: pid)
+            if wid != kCGNullWindowID { return wid }
+        }
+        let wid = frontWindowID(pid: pid)
+        return wid == kCGNullWindowID ? nil : wid
+    }
+
+    // List order is front to back, so the first real window is the one in front.
+    private func frontWindowID(pid: pid_t) -> CGWindowID {
+        let list = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] ?? []
+        for info in list {
+            guard (info[kCGWindowOwnerPID as String] as? pid_t) == pid,
+                  let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let wid = info[kCGWindowNumber as String] as? CGWindowID,
+                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat],
+                  (bounds["Width"] ?? 0) > 80, (bounds["Height"] ?? 0) > 80
+            else { continue }
+            return wid
+        }
+        return kCGNullWindowID
     }
 
     // MARK: - AX observer

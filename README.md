@@ -10,6 +10,12 @@ This keeps a set color on the three you used last, so you can see where you came
 
 Colors show only in Mission Control. The menu bar item is NoTabs. Free, and not on the App Store.
 
+The last three windows keep their color and a number. The contents in these pictures are blurred.
+
+![Mission Control windows with a purple border numbered 1 and a teal border numbered 3. Window contents are blurred.](docs/mission-control.png)
+
+![A Mission Control window with an amber border numbered 2. Window contents are blurred.](docs/mission-control-2.png)
+
 [Website](https://incyashraj.github.io/NoTabsConfusion/) · [Download 1.3](https://github.com/incyashraj/NoTabsConfusion/releases/latest/download/NoTabsConfusion-1.3.zip)
 
 <img src="docs/icon.png" width="64" height="64" alt="NoTabsConfusion icon">

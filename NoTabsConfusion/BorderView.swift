@@ -1,7 +1,8 @@
 import AppKit
 import QuartzCore
 
-// One steady border. Rank 0, 1, and 2 differ only by the color they are given.
+// Rank 0, the app you just left, has a bright segment traveling the edge.
+// The other two stay still. The middle of the window stays empty.
 final class BorderView: NSView {
 
     var borderColor: NSColor = Prefs.defaultColors[0] { didSet { updateAppearance() } }
@@ -9,11 +10,16 @@ final class BorderView: NSView {
     var glowRadius: CGFloat = Prefs.defaultGlow { didSet { updateAppearance() } }
     var showsIcon: Bool = true { didSet { updateIconLayer() } }
     var appIcon: NSImage? { didSet { updateIconLayer() } }
+    var revolves: Bool = false { didSet { syncMotion() } }
 
+    private let rim = CALayer()
     private let stroke = CAShapeLayer()
+    private let comet = CAShapeLayer()
     private let ringMask = CAShapeLayer()
     private let icon = CALayer()
     private let iconSize: CGFloat = 32
+    private var dashCycle: CGFloat = 1
+    private var animatedCycle: CGFloat = -1
 
     override var isOpaque: Bool { false }
 
@@ -27,11 +33,20 @@ final class BorderView: NSView {
 
         stroke.fillColor = CGColor.clear
         stroke.lineJoin = .round
+        stroke.lineCap = .round
         stroke.shadowOffset = .zero
         stroke.shadowPath = nil
+
+        comet.fillColor = CGColor.clear
+        comet.lineJoin = .round
+        comet.lineCap = .round
+        comet.isHidden = true
+
         ringMask.fillRule = .evenOdd
-        stroke.mask = ringMask
-        layer?.addSublayer(stroke)
+        rim.mask = ringMask
+        rim.addSublayer(stroke)
+        rim.addSublayer(comet)
+        layer?.addSublayer(rim)
 
         icon.contentsGravity = .resizeAspect
         icon.cornerRadius = 7
@@ -52,7 +67,37 @@ final class BorderView: NSView {
         stroke.shadowOpacity = glowRadius > 0 ? 0.85 : 0
         stroke.shadowPath = nil
         CATransaction.commit()
+        syncMotion()
         needsLayout = true
+    }
+
+    private func syncMotion() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        comet.isHidden = !revolves
+        let bright = borderColor.blended(withFraction: 0.6, of: .white) ?? borderColor
+        comet.strokeColor = bright.cgColor
+        comet.lineWidth = borderWidth + 2
+        comet.fillColor = CGColor.clear
+        CATransaction.commit()
+
+        guard revolves else {
+            comet.removeAnimation(forKey: "revolve")
+            animatedCycle = -1
+            return
+        }
+        if comet.animation(forKey: "revolve") != nil, abs(animatedCycle - dashCycle) < 8 {
+            return
+        }
+        comet.removeAnimation(forKey: "revolve")
+        let spin = CABasicAnimation(keyPath: "lineDashPhase")
+        spin.fromValue = 0
+        spin.toValue = dashCycle
+        spin.duration = 1.35
+        spin.repeatCount = .infinity
+        spin.timingFunction = CAMediaTimingFunction(name: .linear)
+        comet.add(spin, forKey: "revolve")
+        animatedCycle = dashCycle
     }
 
     private func updateIconLayer() {
@@ -69,16 +114,26 @@ final class BorderView: NSView {
         CATransaction.setDisableActions(true)
 
         let inset = borderWidth / 2 + 1
+        let pathBounds = bounds.insetBy(dx: inset, dy: inset)
         let path = CGPath(
-            roundedRect: bounds.insetBy(dx: inset, dy: inset),
+            roundedRect: pathBounds,
             cornerWidth: 10,
             cornerHeight: 10,
             transform: nil
         )
+        rim.frame = bounds
         stroke.frame = bounds
         stroke.path = path
         stroke.fillColor = CGColor.clear
         stroke.shadowPath = nil
+        comet.frame = bounds
+        comet.path = path
+        let loop = max(2 * (pathBounds.width + pathBounds.height), 40)
+        let head = min(max(loop * 0.18, 28), loop * 0.32)
+        let gap = max(loop - head, 1)
+        dashCycle = head + gap
+        comet.lineDashPattern = [NSNumber(value: Double(head)), NSNumber(value: Double(gap))]
+        comet.lineDashPhase = 0
         // The glow is a shadow. Without a hole it paints the whole window.
         // Keep a ring at the edge and leave the middle empty.
         let ring = CGMutablePath()
@@ -105,5 +160,6 @@ final class BorderView: NSView {
         icon.isHidden = !showsIcon || appIcon == nil
 
         CATransaction.commit()
+        syncMotion()
     }
 }

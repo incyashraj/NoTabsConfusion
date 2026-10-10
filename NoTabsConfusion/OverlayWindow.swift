@@ -7,6 +7,7 @@ final class OverlayWindow: NSWindow {
     init(rank: Int) {
         borderView = BorderView()
         borderView.borderColor = Prefs.defaultColors[rank]
+        borderView.revolves = rank == 0
         super.init(contentRect: .zero, styleMask: .borderless,
                    backing: .buffered, defer: false)
         isOpaque = false

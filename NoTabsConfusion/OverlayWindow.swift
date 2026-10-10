@@ -41,8 +41,8 @@ final class OverlayWindowController {
     private var settledAt: Date?
     private var hidForThisGesture = false
 
-    func update(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) {
-        let shield = MissionControl.isActive
+    func update(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)], missionControl: Bool) {
+        let shield = missionControl
         if !shield { hidForThisGesture = false }
         let settled = framesLookSettled(slots)
 
@@ -77,10 +77,19 @@ final class OverlayWindowController {
         for (i, win) in windows.enumerated() {
             if visible && i < limit {
                 let slot = slots[i]
-                win.setFrame(slot.frame.insetBy(dx: -padding, dy: -padding), display: true)
-                win.borderView.appIcon = slot.icon
+                let frame = slot.frame.insetBy(dx: -padding, dy: -padding)
+                let moved = abs(win.frame.minX - frame.minX) > 0.5
+                    || abs(win.frame.minY - frame.minY) > 0.5
+                    || abs(win.frame.width - frame.width) > 0.5
+                    || abs(win.frame.height - frame.height) > 0.5
+                if !win.isVisible || moved {
+                    win.setFrame(frame, display: true)
+                }
+                if win.borderView.appIcon !== slot.icon {
+                    win.borderView.appIcon = slot.icon
+                }
                 if !win.isVisible { win.orderFront(nil) }
-            } else {
+            } else if win.isVisible {
                 win.orderOut(nil)
             }
         }
@@ -126,7 +135,7 @@ final class OverlayWindowController {
             return false
         }
         if settledAt == nil { settledAt = Date() }
-        return Date().timeIntervalSince(settledAt!) >= 0.12
+        return Date().timeIntervalSince(settledAt!) >= 0.05
     }
 
     // Closing Mission Control grows the tiles back. A slow animation changes

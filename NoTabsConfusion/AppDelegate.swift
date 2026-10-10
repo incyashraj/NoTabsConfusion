@@ -193,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 extension OverlayWindowController: WindowTrackerDelegate {
-    func windowTrackerDidUpdate(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) {
-        update(slots: slots)
+    func windowTrackerDidUpdate(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)], missionControl: Bool) {
+        update(slots: slots, missionControl: missionControl)
     }
 }

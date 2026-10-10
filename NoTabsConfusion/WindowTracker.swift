@@ -1,10 +1,7 @@
 import AppKit
-import ApplicationServices
-
-@_silgen_name("_AXUIElementGetWindow") func _AXUIElementGetWindow(_ element: AXUIElement, _ wid: inout CGWindowID) -> AXError
 
 protocol WindowTrackerDelegate: AnyObject {
-    func windowTrackerDidUpdate(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)])
+    func windowTrackerDidUpdate(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)], missionControl: Bool)
 }
 
 final class WindowTracker {
@@ -17,13 +14,66 @@ final class WindowTracker {
         var windowID: CGWindowID
     }
 
-    private var axObserver: AXObserver?
-    private var observedPID: pid_t = 0
+    private struct SnapWindow {
+        var id: CGWindowID
+        var pid: pid_t
+        var layer: Int
+        var bounds: CGRect
+        var onScreen: Bool
+        var owner: String
+        var name: String
+    }
+
+    private struct Snapshot {
+        var windows: [SnapWindow]
+        var byID: [CGWindowID: SnapWindow]
+
+        var missionControl: Bool {
+            for window in windows where window.onScreen {
+                if window.name.contains("Mission Control") || window.name.contains("Expose") {
+                    return true
+                }
+                if window.owner == "WindowManager",
+                   window.layer >= 15,
+                   window.bounds.width >= 400,
+                   window.bounds.height >= 400 {
+                    return true
+                }
+            }
+            return false
+        }
+
+        // List order is front to back.
+        func frontWindow(pid: pid_t) -> SnapWindow? {
+            for window in windows where window.onScreen
+                && window.pid == pid
+                && window.layer == 0
+                && window.bounds.width > 48
+                && window.bounds.height > 48 {
+                return window
+            }
+            return nil
+        }
+    }
+
+    private struct SlotKey: Equatable {
+        var id: CGWindowID
+        var x: Int
+        var y: Int
+        var w: Int
+        var h: Int
+    }
+
     // The last real app the user was in. Mission Control must not replace this.
     private var frontPIDToTrack: pid_t = 0
     // Most recent app first. One entry per app, not per window.
     private var recents: [RecentApp] = []
     private var pollTimer: Timer?
+    private var bundleIDs: [pid_t: String] = [:]
+    private var icons: [pid_t: NSImage] = [:]
+    private var primaryFrame: NSRect = .zero
+    private var lastKeys: [SlotKey] = []
+    private var lastShield = false
 
     // These own Mission Control chrome and permission dialogs, not apps the user switched to.
     private let systemBundleIDs: Set<String> = [
@@ -41,123 +91,131 @@ final class WindowTracker {
     }
 
     func start() {
-        NSWorkspace.shared.notificationCenter.addObserver(
-            self,
-            selector: #selector(activeAppChanged),
-            name: NSWorkspace.didActivateApplicationNotification,
-            object: nil
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(self, selector: #selector(activeAppChanged),
+                           name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        center.addObserver(self, selector: #selector(activeAppChanged),
+                           name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(screenChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil
         )
+        refreshPrimaryFrame()
 
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             self?.pollFrame()
         }
+        timer.tolerance = 1.0 / 120.0
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
 
-        seedFromVisibleWindows()
-        syncFrontApp()
+        let snapshot = capture()
+        seed(from: snapshot)
+        syncFrontApp(snapshot)
     }
 
     func forget(bundleID: String) {
         recents.removeAll { $0.bundleID == bundleID }
-        publish()
+        publish(capture(), force: true)
     }
 
     func applyLimits() {
         trim()
-        publish()
+        publish(capture(), force: true)
     }
 
     @objc private func activeAppChanged() {
-        // Record it now. A swipe can start before the next poll.
-        syncFrontApp()
+        // Record it now. A swipe can start before the next frame.
+        syncFrontApp(capture())
     }
 
-    private func isTrackable(_ bundleID: String) -> Bool {
+    @objc private func screenChanged() {
+        refreshPrimaryFrame()
+        publish(capture(), force: true)
+    }
+
+    private func pollFrame() {
+        syncFrontApp(capture())
+    }
+
+    private func isTrackable(_ bundleID: String, ignored: Set<String>) -> Bool {
         bundleID != Bundle.main.bundleIdentifier
             && !systemBundleIDs.contains(bundleID)
-            && !Prefs.ignoredBundleIDs().contains(bundleID)
+            && !ignored.contains(bundleID)
     }
 
     // Front-to-back windows already on screen, so the first swipe has something to color.
-    private func seedFromVisibleWindows() {
-        let list = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
-        ) as? [[String: Any]] ?? []
+    private func seed(from snapshot: Snapshot) {
+        let ignored = Set(Prefs.ignoredBundleIDs())
         var seen = Set<String>()
-        for info in list {
-            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t,
-                  let wid = info[kCGWindowNumber as String] as? CGWindowID,
-                  let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
-                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat],
-                  (bounds["Width"] ?? 0) > 80, (bounds["Height"] ?? 0) > 80,
-                  let bundleID = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier,
-                  isTrackable(bundleID),
+        for window in snapshot.windows {
+            guard window.onScreen, window.layer == 0,
+                  window.bounds.width > 48, window.bounds.height > 48,
+                  let bundleID = bundleID(for: window.pid),
+                  isTrackable(bundleID, ignored: ignored),
                   !seen.contains(bundleID)
             else { continue }
             seen.insert(bundleID)
-            recents.append(RecentApp(bundleID: bundleID, pid: pid, windowID: wid))
+            recents.append(RecentApp(bundleID: bundleID, pid: window.pid, windowID: window.id))
             if recents.count == Prefs.recentCount { break }
         }
     }
 
-    private func pollFrame() {
-        syncFrontApp()
-    }
-
-    // The app in front becomes 1. If its window is not open yet, later polls
-    // try again, including the start of Mission Control, so a just-launched
-    // app is not left off the list.
-    private func syncFrontApp() {
-        let shield = MissionControl.isActive
+    // The app in front becomes 1. If its window is not open yet, the next
+    // frames try again, including the start of Mission Control.
+    private func syncFrontApp(_ snapshot: Snapshot) {
+        let shield = snapshot.missionControl
+        let ignored = Set(Prefs.ignoredBundleIDs())
         if !shield {
-            noteFrontApp()
+            noteFrontApp(ignored: ignored)
         }
-        adoptFrontAppIfNeeded(shield: shield)
-        repairMissingWindows()
-        publish()
+        adoptFrontAppIfNeeded(snapshot, shield: shield, ignored: ignored)
+        if !shield {
+            repairMissingWindows(snapshot)
+        }
+        publish(snapshot, force: false)
     }
 
-    private func noteFrontApp() {
+    private func noteFrontApp(ignored: Set<String>) {
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bundleID = app.bundleIdentifier,
-              isTrackable(bundleID),
+              isTrackable(bundleID, ignored: ignored),
               !app.isTerminated
         else { return }
         frontPIDToTrack = app.processIdentifier
-        if AXIsProcessTrusted(), frontPIDToTrack != observedPID {
-            installAXObserver(pid: frontPIDToTrack)
-        }
+        bundleIDs[frontPIDToTrack] = bundleID
     }
 
-    private func adoptFrontAppIfNeeded(shield: Bool) {
+    private func adoptFrontAppIfNeeded(_ snapshot: Snapshot, shield: Bool, ignored: Set<String>) {
         guard frontPIDToTrack != 0,
               let app = NSRunningApplication(processIdentifier: frontPIDToTrack),
               let bundleID = app.bundleIdentifier,
-              isTrackable(bundleID),
-              let wid = resolveWindowID(pid: frontPIDToTrack)
+              isTrackable(bundleID, ignored: ignored),
+              let window = snapshot.frontWindow(pid: frontPIDToTrack)
         else { return }
+        bundleIDs[app.processIdentifier] = bundleID
 
-        // During the swipe, keep the window we already drew for this app.
+        // During the swipe, keep the window already chosen for this app.
         if shield,
            recents.first?.bundleID == bundleID,
-           frameForWindowID(recents.first?.windowID ?? 0) != nil {
+           snapshot.byID[recents.first?.windowID ?? 0]?.onScreen == true {
             return
         }
-        if recents.first?.bundleID == bundleID, recents.first?.windowID == wid {
+        if recents.first?.bundleID == bundleID, recents.first?.windowID == window.id {
             return
         }
         recents.removeAll { $0.bundleID == bundleID }
-        recents.insert(RecentApp(bundleID: bundleID, pid: app.processIdentifier, windowID: wid), at: 0)
+        recents.insert(RecentApp(bundleID: bundleID, pid: app.processIdentifier, windowID: window.id), at: 0)
         trim()
     }
 
     // A replaced window used to leave the app in the list with nothing to draw,
     // so an older app showed up as 1.
-    private func repairMissingWindows() {
+    private func repairMissingWindows(_ snapshot: Snapshot) {
         for index in recents.indices {
-            if frameForWindowID(recents[index].windowID) != nil { continue }
-            let wid = frontWindowID(pid: recents[index].pid)
-            if wid != kCGNullWindowID {
-                recents[index].windowID = wid
+            if snapshot.byID[recents[index].windowID]?.onScreen == true { continue }
+            if let window = snapshot.frontWindow(pid: recents[index].pid) {
+                recents[index].windowID = window.id
             }
         }
     }
@@ -169,168 +227,114 @@ final class WindowTracker {
         }
     }
 
-    private func publish() {
+    private func publish(_ snapshot: Snapshot, force: Bool) {
+        let shield = snapshot.missionControl
         recents.removeAll { slot in
-            !windowStillExists(slot.windowID)
-                && NSRunningApplication(processIdentifier: slot.pid) == nil
+            if snapshot.byID[slot.windowID] != nil { return false }
+            let alive = NSRunningApplication(processIdentifier: slot.pid) != nil
+            if !alive {
+                bundleIDs[slot.pid] = nil
+                icons[slot.pid] = nil
+            }
+            return !alive
         }
 
         var result: [(id: CGWindowID, frame: NSRect, icon: NSImage?)] = []
-        var seenFrames: [NSRect] = []
+        var seenIDs = Set<CGWindowID>()
+        let ignored = Set(Prefs.ignoredBundleIDs())
 
         for slot in recents {
-            guard let frame = frameForWindowID(slot.windowID) else { continue }
-            let duplicate = seenFrames.contains {
-                abs($0.minX - frame.minX) < 20 &&
-                abs($0.minY - frame.minY) < 20 &&
-                abs($0.width - frame.width) < 20 &&
-                abs($0.height - frame.height) < 20
-            }
-            if duplicate { continue }
-            seenFrames.append(frame)
-            let icon = NSRunningApplication(processIdentifier: slot.pid)?.icon
-            result.append((id: slot.windowID, frame: frame, icon: icon))
+            guard !seenIDs.contains(slot.windowID),
+                  let frame = frame(slot.windowID, snapshot: snapshot, ignored: ignored)
+            else { continue }
+            seenIDs.insert(slot.windowID)
+            result.append((id: slot.windowID, frame: frame, icon: icon(for: slot.pid)))
             if result.count == Prefs.recentCount { break }
         }
 
-        delegate?.windowTrackerDidUpdate(slots: result)
-    }
-
-    private func resolveWindowID(pid: pid_t) -> CGWindowID? {
-        if AXIsProcessTrusted(),
-           let element = focusedWindowElement(pid: pid),
-           !isMinimized(element) {
-            let wid = matchCGWindowID(axElement: element, pid: pid)
-            if wid != kCGNullWindowID { return wid }
+        let keys = result.map {
+            SlotKey(id: $0.id,
+                    x: Int($0.frame.minX.rounded()),
+                    y: Int($0.frame.minY.rounded()),
+                    w: Int($0.frame.width.rounded()),
+                    h: Int($0.frame.height.rounded()))
         }
-        let wid = frontWindowID(pid: pid)
-        return wid == kCGNullWindowID ? nil : wid
+        if !force && shield == lastShield && keys == lastKeys { return }
+        lastShield = shield
+        lastKeys = keys
+        delegate?.windowTrackerDidUpdate(slots: result, missionControl: shield)
     }
 
-    // List order is front to back, so the first real window is the one in front.
-    private func frontWindowID(pid: pid_t) -> CGWindowID {
-        let list = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
-        ) as? [[String: Any]] ?? []
-        for info in list {
-            guard (info[kCGWindowOwnerPID as String] as? pid_t) == pid,
-                  let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
-                  let wid = info[kCGWindowNumber as String] as? CGWindowID,
-                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat],
-                  (bounds["Width"] ?? 0) > 80, (bounds["Height"] ?? 0) > 80
-            else { continue }
-            return wid
-        }
-        return kCGNullWindowID
+    private func bundleID(for pid: pid_t) -> String? {
+        if let cached = bundleIDs[pid] { return cached }
+        guard let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier else { return nil }
+        bundleIDs[pid] = id
+        return id
     }
 
-    // MARK: - AX observer
-
-    private func installAXObserver(pid: pid_t) {
-        axObserver = nil
-        observedPID = pid
-
-        var obs: AXObserver?
-        let ref = Unmanaged.passUnretained(self).toOpaque()
-
-        let cb: AXObserverCallback = { _, _, _, refcon in
-            guard let ptr = refcon else { return }
-            let me = Unmanaged<WindowTracker>.fromOpaque(ptr).takeUnretainedValue()
-            DispatchQueue.main.async { me.syncFrontApp() }
-        }
-
-        guard AXObserverCreate(pid, cb, &obs) == .success, let obs else { return }
-
-        let appEl = AXUIElementCreateApplication(pid)
-        for note in [kAXFocusedWindowChangedNotification,
-                     kAXWindowMovedNotification,
-                     kAXWindowResizedNotification] {
-            AXObserverAddNotification(obs, appEl, note as CFString, ref)
-        }
-        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
-        axObserver = obs
+    private func icon(for pid: pid_t) -> NSImage? {
+        if let cached = icons[pid] { return cached }
+        guard let image = NSRunningApplication(processIdentifier: pid)?.icon else { return nil }
+        icons[pid] = image
+        return image
     }
 
-    private func focusedWindowElement(pid: pid_t) -> AXUIElement? {
-        let app = AXUIElementCreateApplication(pid)
-        var val: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &val) == .success else { return nil }
-        return (val as! AXUIElement)
-    }
-
-    private func isMinimized(_ el: AXUIElement) -> Bool {
-        var val: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXMinimizedAttribute as CFString, &val) == .success else { return false }
-        return (val as? Bool) ?? false
-    }
-
-    private func axFrame(_ el: AXUIElement) -> CGRect? {
-        var pRef: CFTypeRef?
-        var sRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &pRef) == .success,
-              AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sRef) == .success,
-              let pRef, let sRef else { return nil }
-        var pt = CGPoint.zero
-        var sz = CGSize.zero
-        AXValueGetValue(pRef as! AXValue, .cgPoint, &pt)
-        AXValueGetValue(sRef as! AXValue, .cgSize, &sz)
-        return CGRect(origin: pt, size: sz)
-    }
-
-    private func matchCGWindowID(axElement: AXUIElement, pid: pid_t) -> CGWindowID {
-        var wid: CGWindowID = kCGNullWindowID
-        _ = _AXUIElementGetWindow(axElement, &wid)
-        if wid != kCGNullWindowID { return wid }
-
-        guard let ax = axFrame(axElement) else { return kCGNullWindowID }
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        for info in list {
-            guard (info[kCGWindowOwnerPID as String] as? pid_t) == pid,
-                  let w = info[kCGWindowNumber as String] as? CGWindowID,
-                  let bd = info[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
-            if abs((bd["Width"] ?? 0) - ax.width) < 4 && abs((bd["Height"] ?? 0) - ax.height) < 4 {
-                return w
-            }
-        }
-        return kCGNullWindowID
-    }
-
-    private func windowStillExists(_ wid: CGWindowID) -> Bool {
-        let list = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        return list.contains { ($0[kCGWindowNumber as String] as? CGWindowID) == wid }
+    private func refreshPrimaryFrame() {
+        let screen = NSScreen.screens.first { $0.displayID == CGMainDisplayID() } ?? NSScreen.main
+        primaryFrame = screen?.frame ?? .zero
     }
 
     // CGWindow bounds use the top-left of the main display. AppKit uses the bottom-left.
-    private func frameForWindowID(_ wid: CGWindowID) -> NSRect? {
-        let onScreen = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
-        ) as? [[String: Any]] ?? []
-
-        guard let info = onScreen.first(where: { ($0[kCGWindowNumber as String] as? CGWindowID) == wid }),
-              let bd = info[kCGWindowBounds as String] as? [String: CGFloat] else { return nil }
-
-        if let pid = info[kCGWindowOwnerPID as String] as? pid_t,
-           let bundleID = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier,
-           Prefs.ignoredBundleIDs().contains(bundleID) {
-            return nil
-        }
-
-        let cg = CGRect(
-            x: bd["X"] ?? 0,
-            y: bd["Y"] ?? 0,
-            width: bd["Width"] ?? 0,
-            height: bd["Height"] ?? 0
-        )
-        guard cg.width > 1, cg.height > 1 else { return nil }
-
-        let primary = NSScreen.screens.first { $0.displayID == CGMainDisplayID() } ?? NSScreen.main
-        guard let primary else { return nil }
+    private func frame(_ wid: CGWindowID, snapshot: Snapshot, ignored: Set<String>) -> NSRect? {
+        guard let window = snapshot.byID[wid], window.onScreen else { return nil }
+        if let bundleID = bundleID(for: window.pid), ignored.contains(bundleID) { return nil }
+        let cg = window.bounds
+        guard cg.width > 1, cg.height > 1, primaryFrame.width > 1 else { return nil }
         return NSRect(
-            x: primary.frame.minX + cg.origin.x,
-            y: primary.frame.maxY - cg.origin.y - cg.height,
+            x: primaryFrame.minX + cg.origin.x,
+            y: primaryFrame.maxY - cg.origin.y - cg.height,
             width: cg.width,
             height: cg.height
         )
+    }
+
+    private func capture() -> Snapshot {
+        let raw = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        var windows: [SnapWindow] = []
+        windows.reserveCapacity(raw.count)
+        var byID: [CGWindowID: SnapWindow] = [:]
+        byID.reserveCapacity(raw.count)
+        for info in raw {
+            guard let id = info[kCGWindowNumber as String] as? CGWindowID,
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat]
+            else { continue }
+            let onScreen: Bool
+            if let flag = info[kCGWindowIsOnscreen as String] as? Bool {
+                onScreen = flag
+            } else if let flag = info[kCGWindowIsOnscreen as String] as? Int {
+                onScreen = flag != 0
+            } else {
+                onScreen = false
+            }
+            let window = SnapWindow(
+                id: id,
+                pid: pid,
+                layer: info[kCGWindowLayer as String] as? Int ?? 0,
+                bounds: CGRect(
+                    x: bounds["X"] ?? 0,
+                    y: bounds["Y"] ?? 0,
+                    width: bounds["Width"] ?? 0,
+                    height: bounds["Height"] ?? 0
+                ),
+                onScreen: onScreen,
+                owner: info[kCGWindowOwnerName as String] as? String ?? "",
+                name: info[kCGWindowName as String] as? String ?? ""
+            )
+            windows.append(window)
+            byID[id] = window
+        }
+        return Snapshot(windows: windows, byID: byID)
     }
 }
 

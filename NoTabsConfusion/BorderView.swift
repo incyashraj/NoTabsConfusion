@@ -184,8 +184,17 @@ final class BorderView: NSView {
             let descriptor = base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor
             let font = NSFont(descriptor: descriptor, size: fontSize) ?? base
             let text = NSString(string: "\(rankNumber)")
-            let color = NSColor(srgbRed: 0.42, green: 0.42, blue: 0.42, alpha: 0.40)
-            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            // Light, so it shows on the dark previews, with a soft dark edge for light ones.
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor(white: 0, alpha: 0.55)
+            shadow.shadowBlurRadius = max(fontSize * 0.04, 1.5)
+            shadow.shadowOffset = NSSize(width: 0, height: -0.5)
+            let color = NSColor(white: 0.96, alpha: 0.58)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: color,
+                .shadow: shadow
+            ]
             let size = text.size(withAttributes: attrs)
             let scale: CGFloat = 2
             guard let rep = NSBitmapImageRep(

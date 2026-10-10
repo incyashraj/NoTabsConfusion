@@ -34,17 +34,42 @@ final class OverlayWindowController {
 
     private let padding: CGFloat = 6
     private var normalSizes: [CGWindowID: CGSize] = [:]
+    private var lastSizes: [CGWindowID: CGSize] = [:]
+    private var tileSizes: [CGWindowID: CGSize] = [:]
+    private var settledAt: Date?
+    private var hidForThisGesture = false
 
     func update(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) {
-        let inMissionControl = isMissionControlActive(slots: slots)
+        let shield = MissionControl.isActive
+        if !shield { hidForThisGesture = false }
+        let settled = framesLookSettled(slots)
 
-        if !inMissionControl {
+        // Remember desktop sizes only once the windows have stopped moving.
+        // The close animation was being saved, so the next swipe drew too big.
+        if !shield {
+            tileSizes.removeAll()
             for slot in slots where slot.frame.width > 40 && slot.frame.height > 40 {
-                normalSizes[slot.id] = slot.frame.size
+                if normalSizes[slot.id] == nil || settled {
+                    normalSizes[slot.id] = slot.frame.size
+                }
             }
         }
 
-        let visible = inMissionControl && !Prefs.isPaused
+        let shrunk = slots.filter { slot in
+            guard let normal = normalSizes[slot.id], normal.width > 1, normal.height > 1 else { return false }
+            let ratio = (slot.frame.width * slot.frame.height) / (normal.width * normal.height)
+            return ratio < 0.65
+        }.count
+        let need = min(slots.count, 2)
+        // Hide while tiles are flying. That pass was painting full-size color over the windows.
+        var visible = shield && settled && !hidForThisGesture && !Prefs.isPaused && need > 0 && shrunk >= need
+        if visible && tilesStartedGrowing(slots) {
+            hidForThisGesture = true
+            visible = false
+        }
+        if visible && tileSizes.isEmpty {
+            tileSizes = Dictionary(uniqueKeysWithValues: slots.map { ($0.id, $0.frame.size) })
+        }
         let limit = min(slots.count, Prefs.recentCount, windows.count)
 
         for (i, win) in windows.enumerated() {
@@ -76,22 +101,46 @@ final class OverlayWindowController {
         }
     }
 
-    // Current macOS draws the four-finger view as WindowManager windows
-    // (ExposeShieldWindow, Spaces Bar), not a Dock window named "Mission Control".
-    // If those are missing, fall back to two or more tracked windows shrinking at once.
-    // One window resized by hand is not enough.
-    private func isMissionControlActive(slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) -> Bool {
-        if Self.systemIsShowingMissionControl() { return true }
-
-        let shrunk = slots.filter { slot in
-            guard let normal = normalSizes[slot.id], normal.width > 1, normal.height > 1 else { return false }
-            let ratio = (slot.frame.width * slot.frame.height) / (normal.width * normal.height)
-            return ratio < 0.45
+    // True only after the tracked frames stop changing. Mission Control animates
+    // for a few tenths of a second, and those in-between sizes are not the tiles.
+    private func framesLookSettled(_ slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) -> Bool {
+        var changed = slots.count != lastSizes.count
+        for slot in slots {
+            let size = slot.frame.size
+            if let previous = lastSizes[slot.id] {
+                if abs(previous.width - size.width) > 4 || abs(previous.height - size.height) > 4 {
+                    changed = true
+                }
+            } else {
+                changed = true
+            }
         }
-        return shrunk.count >= 2
+        lastSizes = Dictionary(uniqueKeysWithValues: slots.map { ($0.id, $0.frame.size) })
+        if changed || slots.isEmpty {
+            settledAt = nil
+            return false
+        }
+        if settledAt == nil { settledAt = Date() }
+        return Date().timeIntervalSince(settledAt!) >= 0.12
     }
 
-    private static func systemIsShowingMissionControl() -> Bool {
+    // Closing Mission Control grows the tiles back. A slow animation changes
+    // only a little between polls, so compare with the size we first drew on.
+    private func tilesStartedGrowing(_ slots: [(id: CGWindowID, frame: NSRect, icon: NSImage?)]) -> Bool {
+        guard !tileSizes.isEmpty else { return false }
+        for slot in slots {
+            guard let tile = tileSizes[slot.id], tile.width > 1, tile.height > 1 else { continue }
+            let ratio = (slot.frame.width * slot.frame.height) / (tile.width * tile.height)
+            if ratio > 1.12 { return true }
+        }
+        return false
+    }
+}
+
+enum MissionControl {
+    // Current macOS draws the four-finger view as WindowManager windows
+    // (ExposeShieldWindow), not a Dock window named "Mission Control".
+    static var isActive: Bool {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
         for info in list {
             let owner = info[kCGWindowOwnerName as String] as? String ?? ""
@@ -99,7 +148,6 @@ final class OverlayWindowController {
             if name.contains("Mission Control") || name.contains("Expose") {
                 return true
             }
-            // Name can be blank. The shield is a large WindowManager window above the desktop.
             guard owner == "WindowManager",
                   let layer = info[kCGWindowLayer as String] as? Int,
                   layer >= 15,

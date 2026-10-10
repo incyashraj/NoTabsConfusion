@@ -100,6 +100,12 @@ final class WindowTracker {
     }
 
     private func refreshTrackedWindow() {
+        // Keep the same three apps for the whole gesture. Reordering mid-swipe
+        // moves the colors onto the wrong windows.
+        if MissionControl.isActive {
+            publish()
+            return
+        }
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bundleID = app.bundleIdentifier,
               isTrackable(bundleID),
@@ -120,6 +126,10 @@ final class WindowTracker {
     }
 
     private func pollFrame() {
+        if MissionControl.isActive {
+            publish()
+            return
+        }
         let frontApp = NSWorkspace.shared.frontmostApplication
         let currentPID = frontApp?.processIdentifier ?? 0
 

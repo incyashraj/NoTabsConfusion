@@ -19,7 +19,8 @@ final class WindowTracker {
 
     private var axObserver: AXObserver?
     private var observedPID: pid_t = 0
-    private var lastFrontmostPID: pid_t = 0
+    // The last real app the user was in. Mission Control must not replace this.
+    private var frontPIDToTrack: pid_t = 0
     // Most recent app first. One entry per app, not per window.
     private var recents: [RecentApp] = []
     private var pollTimer: Timer?
@@ -52,7 +53,7 @@ final class WindowTracker {
         }
 
         seedFromVisibleWindows()
-        refreshTrackedWindow()
+        syncFrontApp()
     }
 
     func forget(bundleID: String) {
@@ -66,9 +67,8 @@ final class WindowTracker {
     }
 
     @objc private func activeAppChanged() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.refreshTrackedWindow()
-        }
+        // Record it now. A swipe can start before the next poll.
+        syncFrontApp()
     }
 
     private func isTrackable(_ bundleID: String) -> Bool {
@@ -99,52 +99,67 @@ final class WindowTracker {
         }
     }
 
-    private func refreshTrackedWindow() {
-        // Keep the same three apps for the whole gesture. Reordering mid-swipe
-        // moves the colors onto the wrong windows.
-        if MissionControl.isActive {
-            publish()
-            return
+    private func pollFrame() {
+        syncFrontApp()
+    }
+
+    // The app in front becomes 1. If its window is not open yet, later polls
+    // try again, including the start of Mission Control, so a just-launched
+    // app is not left off the list.
+    private func syncFrontApp() {
+        let shield = MissionControl.isActive
+        if !shield {
+            noteFrontApp()
         }
+        adoptFrontAppIfNeeded(shield: shield)
+        repairMissingWindows()
+        publish()
+    }
+
+    private func noteFrontApp() {
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bundleID = app.bundleIdentifier,
               isTrackable(bundleID),
               !app.isTerminated
         else { return }
-
-        let pid = app.processIdentifier
-        if AXIsProcessTrusted(), pid != observedPID {
-            installAXObserver(pid: pid)
+        frontPIDToTrack = app.processIdentifier
+        if AXIsProcessTrusted(), frontPIDToTrack != observedPID {
+            installAXObserver(pid: frontPIDToTrack)
         }
-
-        guard let wid = resolveWindowID(pid: pid) else { return }
-
-        recents.removeAll { $0.bundleID == bundleID }
-        recents.insert(RecentApp(bundleID: bundleID, pid: pid, windowID: wid), at: 0)
-        trim()
-        publish()
     }
 
-    private func pollFrame() {
-        if MissionControl.isActive {
-            publish()
-            return
-        }
-        let frontApp = NSWorkspace.shared.frontmostApplication
-        let currentPID = frontApp?.processIdentifier ?? 0
+    private func adoptFrontAppIfNeeded(shield: Bool) {
+        guard frontPIDToTrack != 0,
+              let app = NSRunningApplication(processIdentifier: frontPIDToTrack),
+              let bundleID = app.bundleIdentifier,
+              isTrackable(bundleID),
+              let wid = resolveWindowID(pid: frontPIDToTrack)
+        else { return }
 
-        if let bid = frontApp?.bundleIdentifier, !isTrackable(bid) {
-            lastFrontmostPID = currentPID
-            publish()
+        // During the swipe, keep the window we already drew for this app.
+        if shield,
+           recents.first?.bundleID == bundleID,
+           frameForWindowID(recents.first?.windowID ?? 0) != nil {
             return
         }
+        if recents.first?.bundleID == bundleID, recents.first?.windowID == wid {
+            return
+        }
+        recents.removeAll { $0.bundleID == bundleID }
+        recents.insert(RecentApp(bundleID: bundleID, pid: app.processIdentifier, windowID: wid), at: 0)
+        trim()
+    }
 
-        if currentPID != lastFrontmostPID && currentPID != 0 {
-            lastFrontmostPID = currentPID
-            refreshTrackedWindow()
-            return
+    // A replaced window used to leave the app in the list with nothing to draw,
+    // so an older app showed up as 1.
+    private func repairMissingWindows() {
+        for index in recents.indices {
+            if frameForWindowID(recents[index].windowID) != nil { continue }
+            let wid = frontWindowID(pid: recents[index].pid)
+            if wid != kCGNullWindowID {
+                recents[index].windowID = wid
+            }
         }
-        publish()
     }
 
     private func trim() {
@@ -221,7 +236,7 @@ final class WindowTracker {
         let cb: AXObserverCallback = { _, _, _, refcon in
             guard let ptr = refcon else { return }
             let me = Unmanaged<WindowTracker>.fromOpaque(ptr).takeUnretainedValue()
-            DispatchQueue.main.async { me.refreshTrackedWindow() }
+            DispatchQueue.main.async { me.syncFrontApp() }
         }
 
         guard AXObserverCreate(pid, cb, &obs) == .success, let obs else { return }

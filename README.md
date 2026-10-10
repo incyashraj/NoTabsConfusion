@@ -10,7 +10,7 @@ This keeps a set color on the three you used last, so you can see where you came
 
 Colors show only in Mission Control. The menu bar item is NoTabs. Free, and not on the App Store.
 
-[Website](https://incyashraj.github.io/NoTabsConfusion/) · [Download 1.1](https://github.com/incyashraj/NoTabsConfusion/releases/latest/download/NoTabsConfusion-1.1.zip)
+[Website](https://incyashraj.github.io/NoTabsConfusion/) · [Download 1.2](https://github.com/incyashraj/NoTabsConfusion/releases/latest/download/NoTabsConfusion-1.2.zip)
 
 <img src="docs/icon.png" width="64" height="64" alt="NoTabsConfusion icon">
 

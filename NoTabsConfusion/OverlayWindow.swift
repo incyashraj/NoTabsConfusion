@@ -50,7 +50,7 @@ final class OverlayWindowController {
         for (i, win) in windows.enumerated() {
             if visible && i < limit {
                 let slot = slots[i]
-                win.setFrame(slot.frame.insetBy(dx: -padding, dy: -padding), display: false)
+                win.setFrame(slot.frame.insetBy(dx: -padding, dy: -padding), display: true)
                 win.borderView.appIcon = slot.icon
                 if !win.isVisible { win.orderFront(nil) }
             } else {
